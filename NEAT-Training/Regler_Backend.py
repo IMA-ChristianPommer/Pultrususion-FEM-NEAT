@@ -1,16 +1,21 @@
+#Backend for the Neat Network
+
 import numpy as np
-numofslices = 50
-#import tensorflow as tf
 import matplotlib.pyplot as plt
 import copy
 from scipy.interpolate import interp1d
+
+numofslices = 50
+
+#Basic Curing Gates
 curinggates = [0.7, 0.6, 0.75, 0.75, 0.59, 0.62, 0.78,
                0.75, 0.66, 0.59, 0.80, 0.64, 0.66, 0.74,
                0.72, 0.6, 0.69, 0.8, 0.69, 0.76, 0.78, 0.79,
                0.73, 0.7, 0.74, 0.55]
+#Number of cycles for each gates
 gatetimes = 200
 
-
+#Initial Variables for the network
 T_0 = 25*np.ones([50,50])
 A_0 = 25*np.zeros([50,50])
 t_slice = np.ones(numofslices)*10
@@ -23,17 +28,16 @@ alevels = np.arange(0, 1, 0.1)
 tlevels = np.arange(25, 200, 25)
 
 
-
-
 A=[]
 T=[]
 t=[]
 
-#Reglernetzwerk generieren
-#PreTrainedModel =tf.keras.models.load_model("Best_model0")
-
 
 def Drawmodels(Drawqueue,dirstring):
+    """
+    Drawing Queue Worker 
+    It draws the results and puts them into a nice graphic
+    """
     print("DRAW QUEUE Starting!")
     Roundfig, (ax_multipl1, ax_multipl2) = plt.subplots(2, 1, figsize=(15, 15))
     ax_multipl1.set_xlim([0,3500])
@@ -42,6 +46,7 @@ def Drawmodels(Drawqueue,dirstring):
     ax_multipl2.set_xlim([0,3500])
     ax_multipl2.set_ylim([0.05, 0.2])
     while(1):
+        #Get new Data! The Header tells what to do
         Header, Data1, Data2 = Drawqueue.get()
         if Header == 1: #Plot Data; Data1=x; Data2=y
             ax_multipl1.plot(Data1, color='0.1')
@@ -65,36 +70,14 @@ def Drawmodels(Drawqueue,dirstring):
             ax_multipl2.set_xlim([0, 3500])
             ax_multipl2.set_ylim([0.05, 0.2])
 
-def Mutatemodel(initlayerweights, noisemaximum):
-    np.random.seed();
-    layerweights = copy.deepcopy(initlayerweights)
-    #check mutation type
-    Type = np.random.rand()
-    if Type>=0.5:
-        for i in range(len(layerweights)):
-            layerweights[i] = layerweights[i] + (noisemaximum*(2*(np.random.rand(*layerweights[i].shape)-.5))**7)
-    else:
-        for i in range(len(layerweights)):
-            layerweights[i] = layerweights[i] * (1+ (noisemaximum*(2*(np.random.rand(*layerweights[i].shape)-.5))**7))
-    return(layerweights)
-
-def calculatebadness(x, xt):
-    return (np.abs(x-xt)**4)
-    #Pre Training
-
-
-def get_weights(model):
-    return model.get('weights')
-
-
-def get_goodness(model):
-    return model.get('goodness')
-
-
-def get_points(model):
-    return model.get('points')
 
 def GetTorA(A_Slices, T_Slices, p_slices, xpos, zpos):
+  """
+  A_Slices - Curing slices (50x50)x N slices
+  T_Slices - Temperature slices (50x50)x N slices
+  p_slices - individual slice position on pultrusion axis
+  Get Curing Value A at position xpos, zpos, y is allways center
+  """
     A_IN = []
     T_IN = []
     p_IN = []
@@ -106,7 +89,6 @@ def GetTorA(A_Slices, T_Slices, p_slices, xpos, zpos):
         T_IN.append(T_Slices[i][xpos, 0])
         p_IN.append(p_slices[i])
 
-
     A_NEW = interp1d(p_IN, A_IN, fill_value=0)
     T_NEW = interp1d(p_IN, T_IN, fill_value=0)
 
@@ -116,7 +98,15 @@ def GetTorA(A_Slices, T_Slices, p_slices, xpos, zpos):
     return (A_NEW(zpos), T_NEW(zpos))
 
 def InterpolatedTimeStep(Pult_Model, T_Slices, A_Slices, t_slice, p_slice,Geschw, dt_target):
-
+    """
+    Pult_Model- Pultrusion ANN Model input
+    A_Slices  - Curing slices (50x50)x N slices
+    T_Slices  - Temperature slices (50x50)x N slices
+    p_slices  - individual slice position on pultrusion axis
+    Geschw    - Speed
+    dt_target - Timestep
+    Allow to make steps smaller than the 10s original step size by interpolation
+    """
     A_Slices10s, T_Slices10s, t_slice10s, p_slice10s = Makestep_Modelslice(Pult_Model, T_Slices, A_Slices, t_slice, p_slice, Geschw, False)
 
     for n in range(len(A_Slices10s)):
@@ -144,12 +134,19 @@ def InterpolatedTimeStep(Pult_Model, T_Slices, A_Slices, t_slice, p_slice,Geschw
             p_slice[n] = p_new
             t_slice[n] = t_new
 
-
-
     return (A_Slices, T_Slices, t_slice, p_slice)
-    #Start numbere
+
 
 def Makestep_Modelslice(Pult_Model,T_Slices,A_Slices,t_slice,p_slice,Geschw, RESET_ON_END=True):
+    """
+    Pult_Model- Pultrusion ANN Model input
+    A_Slices  - Curing slices (50x50)x N slices
+    T_Slices  - Temperature slices (50x50)x N slices
+    p_slices  - individual slice position on pultrusion axis
+    Geschw    - Speed
+    RESET_ON_END - Reset slices outside of the tool
+    Allow to make steps smaller than the 10s original step size by interpolation
+    """
     Datain = []
     T_IN = []
     A_IN = []
@@ -162,7 +159,6 @@ def Makestep_Modelslice(Pult_Model,T_Slices,A_Slices,t_slice,p_slice,Geschw, RES
     D_IN = np.array(Datain, dtype=np.float32)
     A_IN = np.array(A_IN,   dtype=np.float32)
     T_IN = np.array(T_IN,   dtype=np.float32)
-
 
     (A_OUT, T_OUT) = Pult_Model((A_IN, T_IN, D_IN))
 
@@ -203,13 +199,22 @@ def Makestep_Modelslice(Pult_Model,T_Slices,A_Slices,t_slice,p_slice,Geschw, RES
 
     return(A_OUT_RESULT, T_OUT_RESULT, t_slice, p_slice)
 
+  
 def Trainingloop(Model, net, drawqueue, draw, speed):
-    # graph.finalize()
+    """
+    Model      - Pultrusion ANN Model input
+    net        - NEAT network
+    drawqueue  - Drawqueue Reference for drawing
+    draw       - (Bool) Draw or not draw
+    speed      - (float) Speed
+    Training Loop
+    """
+    #Preset Variables
     ModelAIn = []
     tIn = []
     Points = 0
-    # Localmodel = tf.keras.models.clone_model(PreTrainedModel)
-    # Localmodel.set_weights(PreTrainedModel.get_weights())
+    
+    #Reset All Slices at the start of the training to initial Slices
     A_Slices = copy.deepcopy(A_Slices_Start)
     T_Slices = copy.deepcopy(T_Slices_Start)
     t_Slices = copy.deepcopy(t_slice_Start)
@@ -217,7 +222,7 @@ def Trainingloop(Model, net, drawqueue, draw, speed):
     # Pre_Generation
     DrawA = []
     DrawS = []
-
+    #Run 50 initial runs to fill up the data
     for i in range(50):
         (A_Slices, T_Slices, t_Slices, p_Slices) = InterpolatedTimeStep(Model, T_Slices, A_Slices, t_Slices, p_Slices,
                                                                         0.1 / 60, 10*speed)
@@ -225,25 +230,32 @@ def Trainingloop(Model, net, drawqueue, draw, speed):
         ModelAIn.append(A_new.mean())
         DrawA.append(A_new.mean())
         DrawS.append(0.1)
-    # Testrung
+  
     ModelAIn = ModelAIn[-19:]
     n = 0
+    #Run the real gauntlet
     for Curing in curinggates:
         drawqueue.put([2,Curing,n ])
+        #Run the loop till gate time is reached and then change the curing value
         for i in range(gatetimes):
-            v_model = net.activate((ModelAIn + [Curing]))
-            v_model = v_model[0]
+            v_model = net.activate((ModelAIn + [Curing])) #Get the model response
+            v_model = v_model[0]                          #Get the new speed
             v_new = np.clip(v_model, 0.05, 0.2)
             v_model = np.clip(v_model, 0.05, 0.2)
-            ModelAIn = ModelAIn[1:]
-
+ 
+            ModelAIn = ModelAIn[1:]                       #remove first Point in the list
+        
+            #Do one Timestep
             (A_Slices, T_Slices, t_Slices, p_Slices) = InterpolatedTimeStep(Model, T_Slices, A_Slices, t_Slices,
                                                                             p_Slices, v_new / 60, 10)
+            #Get actual curing value
             A_new, T_new = GetTorA(A_Slices, T_Slices, p_Slices, 25, 0.8)
+            #Set the new modelinput as well as the Drawqueue
             ModelAIn.append(A_new.mean())
             DrawA.append(A_new.mean())
             DrawS.append(v_new)
 
+            #Add Points to the fitness function
             if (0.05 <= v_model <= 0.2):
                 Points += 1 + np.abs(Curing - A_new.mean())
             else:
@@ -253,7 +265,7 @@ def Trainingloop(Model, net, drawqueue, draw, speed):
                     Points += 1 / (1 + np.abs(v_model - 0.2))
                 break
 
-
+        #Add Points for the gates or break on miss
         if (0.05 <= v_model <= 0.2):
             if np.abs(A_new.mean() - Curing) < 0.01:
                 Points += 1000
@@ -264,17 +276,14 @@ def Trainingloop(Model, net, drawqueue, draw, speed):
         else:
             break
         n += 1
-
+    
+    #Draw if wanted
     if draw:
         drawqueue.put([1,DrawA, DrawS])
-    # if (v_model >= 0.05) and (v_model <= 0.2):
-    #      if (v_model < 0.05): Points += np.abs(v_model-0.05)*100+100000
-    #     elif (v_model > 0.2): Points += np.abs(v_model-0.2)*100+100000
-
-
 
     return (Points)
 
+#Preload everything
 Data = np.load("Startingslices.npz")
 
 A_Slices_Start = Data["A_Slices_Start"]
