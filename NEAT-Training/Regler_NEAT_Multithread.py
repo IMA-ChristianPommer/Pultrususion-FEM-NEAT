@@ -13,14 +13,11 @@ os.environ["PATH"] += os.pathsep + 'C:/Program Files/Graphviz/bin'
 import neat.config
 import multiprocessing, time, ctypes, os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
 import numpy as np
 import scipy
 import matplotlib.pyplot as plt
-#import tensorflow as tf
 import pickle
 import copy
-
 import visualize
 from itertools import cycle
 from datetime import datetime
@@ -31,13 +28,8 @@ import sys
 import random
 
 Processes = []
-
-
 locklist = []
 Modellist = []
-
-
-
 
 cycol = cycle('bgrcmk')
 
@@ -45,18 +37,23 @@ queue_in    = multiprocessing.Queue()
 queue_out   = multiprocessing.Queue()
 drawqueue   = multiprocessing.Queue()
 
-numofprocesses = 3
+numofprocesses = 3      #Sets number of processes spawned by the trainer
+generations    = 1000   #Number of Generations to train
 
-#Lets start with 4 Threads!
 def Keras_Model_Process(queue_input, queue_output, drawqueue):
-    import tensorflow as tf
+    import tensorflow as tf #import Tensorflow at every Queue
     sys.stdout.flush()
-    physical_devices = tf.config.list_physical_devices('GPU')
+    #Set Memory Growth on Devices
+    physical_devices = tf.config.list_physical_devices('GPU')  
     try:
         tf.config.experimental.set_memory_growth(physical_devices[0], True)
     except:
+        print("Error setting memory growth on GPU device")
         pass
+    
+    #Load ANN-FE-Model
     PreTrainedModel = tf.keras.models.load_model("Best_model0")
+    #Start handling Data
     while(True):
         #if queue_input.not_empty:
         id, net, Done, speed = queue_input.get()
@@ -64,20 +61,8 @@ def Keras_Model_Process(queue_input, queue_output, drawqueue):
 
 
 now = datetime.now()
-
 Datatime = ""
 
-# axen 0-x; 1-y; 2-z
-generations = 1000
-numberofentities = 100
-numofslices = 50
-minslicedistance = 1.0 / numofslices
-
-
-#tf.keras.backend.clear_session()
-#PreTrainedModel =tf.keras.models.load_model("Best_model0")
-
-initlifepoints = 1
 def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='█', printEnd="\r"):
     """
     Call in a loop to create terminal progress bar
@@ -99,67 +84,59 @@ def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=
     if iteration == total:
         print()
 
-print("Model loaded")
+
 Generation = 0
 
 def eval_genomes(genomes, config):
-
+    """
+    Evaluation Function
+    Puts all of the genomes in queues and retrieves fitness
+    Input after NEAT-Definition
+    """
     global Generation
     i=0
-    speed = random.uniform(0.5,1.5)
-    #genomes = pool.imap_unordered(Engine, genomes)
+    speed = random.uniform(0.5,1.5)                             # Use Random Speed 
     for genome_id, genome in genomes:
-        genome.fitness = -1
-        net = neat.nn.FeedForwardNetwork.create(genome, config)
-        queue_in.put([i, net, False, speed])
+        genome.fitness = -1                                     # Set initial Fitness
+        net = neat.nn.FeedForwardNetwork.create(genome, config) 
+        queue_in.put([i, net, False, speed])                    # Put into calculation queue
         i+=1
-    print("Everything sorted!")
-    anythingleft = True
-    for i in range(len(genomes)):
-        
-        ID, Fitness, Done = queue_out.get(True)
-        genomes[ID][1].fitness = Fitness
+   
+    for i in range(len(genomes)):  
+        # Recieve Results
+        ID, Fitness, Done = queue_out.get(True)                 
+        genomes[ID][1].fitness = Fitness                        
         printProgressBar(i, 250, prefix="Recieving: ")
-    drawqueue.put([4, Generation, 1])
+    drawqueue.put([4, Generation, 1])                           #Draw everything
     Generation += 1
+    
 
-def eval_genome(genome, config):
-    i=0
-
-    #genomes = pool.imap_unordered(Engine, genomes)
-
-
-    fitness = 0
-    net = neat.nn.FeedForwardNetwork.create(genome, config)
-    fitness = Regler_Backend.Trainingloop(Regler_Backend.PreTrainedModel, net, 0.1, False, 'grey', False)
-    return fitness
-
-########################################################################################################################
-#Neat Implementation
-########################################################################################################################
-
-
-
-#winner_net = neat.nn.FeedForwardNetwork.create(winner, config)
 if __name__ == '__main__':
-
+    #Set up Working folder
     dt_string = now.strftime("%d-%m-%Y--%H-%M-%S")
     dirstring = "Winningspree/"
-
+    try
+        os.mkdir(dirstring)
+    except
+        os.mkdir(dirstring + "draw_net")
+        os.mkdir(dirstring + "Evalresults")    
+    
     multiprocessing.freeze_support()
-
+    
+    #Set up Multiprocessing calculation
     for i in range(numofprocesses):
         Processes.append(multiprocessing.Process(target=Keras_Model_Process, args=(queue_in, queue_out, drawqueue)))
         Processes[i].daemon = True
         Processes[i].start()
+        
+    #Set up drawing queue
     p = multiprocessing.Process(target=Regler_Backend.Drawmodels,args=(drawqueue, dirstring))
     p.start()
+    
+    #Set up neat####################################################################################
     neatconfig = config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
                                       neat.DefaultSpeciesSet, neat.DefaultStagnation,
                                       "Neatconfig_Config.ini")
-    #p = neat.Population(config)
-
-    p = neat.Checkpointer.restore_checkpoint('neat-checkpoint-270')
 
     p.config.no_fitness_termination = True
     p.add_reporter(neat.StdOutReporter(True))
@@ -168,13 +145,8 @@ if __name__ == '__main__':
 
     p.add_reporter(stats)
     p.add_reporter(neat.Checkpointer(5))
-
-    try
-    os.mkdir(dirstring)
-    except
-    os.mkdir(dirstring + "draw_net")
-    os.mkdir(dirstring + "Evalresults")
-    for i in range(1):
+    #Start Neat####################################################################################
+    for i in range(generations):
 
         winner = p.run(eval_genomes, 1)
 
@@ -203,24 +175,13 @@ if __name__ == '__main__':
         visualize.draw_net(config, winner, False,filename=dirstring+"draw_net/"+str(i), node_names=node_names,fmt='svg')
         visualize.plot_stats(stats, ylog=False, view=False, filename=dirstring + "structures.svg")
         visualize.plot_species(stats, view=False, filename=dirstring + "species.svg")
+ 
+
     print('\nBest genome:\n{!s}'.format(winner))
     # Show output of the most fit genome against training data.
     print('\nOutput:')
 
     winner = []
-    with open("Best_winner_290521.pkl", "wb") as f:
+    with open("Best_winner.pkl", "wb") as f:
         pickle.dump(winner, f)
         f.close()
-
-#Trainingloop(winner_net,0.1, False, 'red')
-
-#node_names = {-1:'A', -2: 'B', 0:'A XOR B'}
-#visualize.draw_net(config, winner, True, node_names=node_names)
-#visualize.plot_stats(stats, ylog=False, view=True)
-#visualize.plot_species(stats, view=True)
-
-#p = neat.Checkpointer.restore_checkpoint('neat-checkpoint-4')
-#p.run(eval_genomes, 10)
-########################################################################################################################
-#End Neat Implementation
-########################################################################################################################
